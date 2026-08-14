@@ -32,7 +32,10 @@ fun FloorPlanScreen(
     val isLoading by deviceViewModel.isLoading
     val errorMessage by deviceViewModel.errorMessage
     var floor by remember { mutableStateOf<Floor?>(null) }
-    var selectedDevice by remember { mutableStateOf<Device?>(null) }
+    var selectedDeviceId by remember { mutableStateOf<String?>(null) }
+
+    // Always fetch the freshest device state from the observed list
+    val currentSelectedDevice = devices.find { it.id == selectedDeviceId }
 
     LaunchedEffect(floorId) {
         deviceViewModel.observeDevicesByFloor(floorId = floorId)
@@ -84,7 +87,7 @@ fun FloorPlanScreen(
                     devices = devices,
                     layoutUrl = floor?.layout,
                     onDeviceClick = { device ->
-                        selectedDevice = device
+                        selectedDeviceId = device.id
                         onDeviceClick(device)
                     },
                     modifier = Modifier.padding(top = 20.dp)
@@ -93,11 +96,13 @@ fun FloorPlanScreen(
         }
     }
 
-    selectedDevice?.let { device ->
+    currentSelectedDevice?.let { device ->
         DeviceControlDialog(
             device = device,
-            onDismiss = { selectedDevice = null },
-            onToggle = { deviceViewModel.toggleDevice(device) },
+            onDismiss = { selectedDeviceId = null },
+            onToggle = {
+                deviceViewModel.toggleDevice(device)
+            },
             onSubSwitchToggle = { subSwitchId ->
                 deviceViewModel.toggleSubSwitch(device, subSwitchId)
             },

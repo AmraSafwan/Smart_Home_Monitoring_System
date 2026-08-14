@@ -6,20 +6,6 @@ import com.google.firebase.firestore.PropertyName
 import com.google.firebase.firestore.ServerTimestamp
 import java.util.Date
 
-enum class DeviceStatus {
-    ON, OFF, ERROR, DISCONNECTED
-}
-
-enum class DeviceType {
-    LIGHT, OUTLET, MULTI_SWITCH, SAFETY_DEVICE, IRON, CAMERA
-}
-
-@IgnoreExtraProperties
-data class DevicePosition(
-    val x: Float = 0f,
-    val y: Float = 0f
-)
-
 @IgnoreExtraProperties
 data class Schedule(
     val enabled: Boolean = false,
@@ -110,3 +96,29 @@ data class Device(
     val endTime: String?
         get() = schedule?.offTime
 }
+// Add this extension property at the bottom of Device.kt
+val Device.powerRatingWatts: Double
+    get() = when (this.type) {
+        DeviceType.LIGHT -> 15.0
+        DeviceType.OUTLET -> 1000.0
+        DeviceType.CAMERA -> 8.0
+        DeviceType.SAFETY_DEVICE -> 1500.0 // e.g., Clothing Iron
+        else -> 50.0
+    }
+
+/**
+ * Calculates current accrued Wh:
+ * Combines stored Firestore historical energy with active runtime since turnedOnAt.
+ */
+val Device.totalCalculatedWh: Double
+    get() {
+        var baseWh = energyConsumptionWh
+        if (status == DeviceStatus.ON && turnedOnAt != null) {
+            val activeMs = System.currentTimeMillis() - turnedOnAt!!.time
+            if (activeMs > 0) {
+                val activeHours = activeMs / (1000.0 * 60.0 * 60.0)
+                baseWh += powerRatingWatts * activeHours
+            }
+        }
+        return baseWh
+    }
