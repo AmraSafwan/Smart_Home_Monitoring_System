@@ -7,6 +7,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.example.smarthome.ui.camera.CameraScreen
+import com.example.smarthome.ui.floor.AddFloorScreen
 import com.example.smarthome.ui.floor.FloorManagementScreen
 import com.example.smarthome.ui.floorplan.FloorPlanScreen
 import com.example.smarthome.ui.home.HomeScreen
@@ -43,6 +44,18 @@ fun AppNavigation() {
                         navController.navigate(
                             "floor_plan/${floor.id}/${floor.name}"
                         )
+                    },
+                    onAddFloorClick = {
+                        navController.navigate(Routes.ADD_FLOOR)
+                    }
+                )
+            }
+
+            // ADD FLOOR
+            composable(Routes.ADD_FLOOR) {
+                AddFloorScreen(
+                    onBack = {
+                        navController.popBackStack()
                     }
                 )
             }
@@ -79,6 +92,10 @@ fun AppNavigation() {
                     floorId = floorId,
 
                     floorName = floorName,
+
+                    onBack = {
+                        navController.popBackStack()
+                    },
 
                     onDeviceClick = { device ->
 

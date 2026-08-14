@@ -1,49 +1,35 @@
 package com.example.smarthome.ui.home
 
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.smarthome.data.model.Device
 import com.example.smarthome.data.model.DeviceStatus
 import com.example.smarthome.ui.device.DeviceCard
 import com.example.smarthome.viewmodel.DeviceViewModel
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
+import com.example.smarthome.viewmodel.FloorViewModel
 
 @Composable
 fun HomeScreen(
-    deviceViewModel: DeviceViewModel = viewModel()
+    deviceViewModel: DeviceViewModel = viewModel(),
+    floorViewModel: FloorViewModel = viewModel()
 ) {
 
     val devices by deviceViewModel.devices
     val isLoading by deviceViewModel.isLoading
     val errorMessage by deviceViewModel.errorMessage
+    val floors by floorViewModel.floors
 
     LaunchedEffect(Unit) {
         deviceViewModel.observeAllDevices()
@@ -58,8 +44,12 @@ fun HomeScreen(
     val disconnectedDevices =
         devices.count { it.status == DeviceStatus.DISCONNECTED }
 
-    var selectedFloor by remember {
+    var selectedFloorName by remember {
         mutableStateOf("All Floors")
+    }
+    
+    var selectedFloorId by remember {
+        mutableStateOf<String?>(null)
     }
 
     Column(
@@ -69,19 +59,31 @@ fun HomeScreen(
     ) {
 
         // Header
-        Text(
-            text = "Smart Home",
-            style = MaterialTheme.typography.headlineMedium
-        )
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Column {
+                Text(
+                    text = "Smart Home",
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "Welcome back!",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Surface(
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.primaryContainer,
+                modifier = Modifier.size(40.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(Icons.Default.Home, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                }
+            }
+        }
 
-        Spacer(modifier = Modifier.height(4.dp))
-
-        Text(
-            text = "Welcome back!",
-            style = MaterialTheme.typography.bodyLarge
-        )
-
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(24.dp))
 
         // Statistics
         Row(
@@ -90,19 +92,21 @@ fun HomeScreen(
         ) {
 
             DashboardStatCard(
-                title = "Devices",
+                title = "Total Devices",
                 value = devices.size.toString(),
+                icon = Icons.Default.Devices,
                 modifier = Modifier.weight(1f)
             )
 
             DashboardStatCard(
-                title = "Active",
+                title = "Active Now",
                 value = activeDevices.toString(),
+                icon = Icons.Default.Power,
                 modifier = Modifier.weight(1f)
             )
         }
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
         // Warning information
         if (errorDevices > 0 || disconnectedDevices > 0) {
@@ -122,7 +126,8 @@ fun HomeScreen(
 
                     Icon(
                         imageVector = Icons.Default.Warning,
-                        contentDescription = "Warning"
+                        contentDescription = "Warning",
+                        tint = MaterialTheme.colorScheme.error
                     )
 
                     Spacer(modifier = Modifier.padding(6.dp))
@@ -130,27 +135,32 @@ fun HomeScreen(
                     Column {
 
                         Text(
-                            text = "Device Attention Required",
-                            style = MaterialTheme.typography.titleMedium
+                            text = "System Alert",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
                         )
 
                         Text(
                             text =
-                                "$errorDevices error, " +
-                                        "$disconnectedDevices disconnected"
+                                "$errorDevices device errors, " +
+                                        "$disconnectedDevices offline"
                         )
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(16.dp))
         }
 
         // Floor selection
-        Text(
-            text = "Current Floor",
-            style = MaterialTheme.typography.titleMedium
-        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.FilterList, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = "Filter by Floor",
+                style = MaterialTheme.typography.titleSmall
+            )
+        }
 
         Spacer(modifier = Modifier.height(8.dp))
 
@@ -158,7 +168,7 @@ fun HomeScreen(
             mutableStateOf(false)
         }
 
-        Column(
+        Box(
             modifier = Modifier.fillMaxWidth()
         ) {
 
@@ -166,17 +176,21 @@ fun HomeScreen(
                 onClick = {
                     floorMenuExpanded = true
                 },
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp)
             ) {
-
-                Text(selectedFloor)
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Text(selectedFloorName)
+                    Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+                }
             }
 
             DropdownMenu(
                 expanded = floorMenuExpanded,
                 onDismissRequest = {
                     floorMenuExpanded = false
-                }
+                },
+                modifier = Modifier.fillMaxWidth(0.9f)
             ) {
 
                 DropdownMenuItem(
@@ -184,64 +198,28 @@ fun HomeScreen(
                         Text("All Floors")
                     },
                     onClick = {
-
-                        selectedFloor = "All Floors"
-
+                        selectedFloorName = "All Floors"
+                        selectedFloorId = null
                         floorMenuExpanded = false
                     }
                 )
 
-                DropdownMenuItem(
-                    text = {
-                        Text("Ground Floor")
-                    },
-                    onClick = {
-
-                        selectedFloor = "Ground Floor"
-
-                        floorMenuExpanded = false
-                    }
-                )
-
-                DropdownMenuItem(
-                    text = {
-                        Text("First Floor")
-                    },
-                    onClick = {
-
-                        selectedFloor = "First Floor"
-
-                        floorMenuExpanded = false
-                    }
-                )
-
-                DropdownMenuItem(
-                    text = {
-                        Text("Second Floor")
-                    },
-                    onClick = {
-
-                        selectedFloor = "Second Floor"
-
-                        floorMenuExpanded = false
-                    }
-                )
-
-                DropdownMenuItem(
-                    text = {
-                        Text("Third Floor")
-                    },
-                    onClick = {
-
-                        selectedFloor = "Third Floor"
-
-                        floorMenuExpanded = false
-                    }
-                )
+                floors.forEach { floor ->
+                    DropdownMenuItem(
+                        text = {
+                            Text(floor.name)
+                        },
+                        onClick = {
+                            selectedFloorName = floor.name
+                            selectedFloorId = floor.id
+                            floorMenuExpanded = false
+                        }
+                    )
+                }
             }
         }
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(24.dp))
 
         // Devices heading
         Row(
@@ -251,85 +229,62 @@ fun HomeScreen(
         ) {
 
             Text(
-                text = "Devices",
-                style = MaterialTheme.typography.titleLarge
+                text = "My Devices",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
             )
 
             TextButton(
                 onClick = {
-                    selectedFloor = "All Floors"
+                    selectedFloorName = "All Floors"
+                    selectedFloorId = null
                 }
             ) {
-                Text("View All")
+                Text("Reset Filter")
             }
         }
 
         Spacer(modifier = Modifier.height(8.dp))
 
         if (isLoading) {
-
-            Text(
-                text = "Loading devices..."
-            )
-
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
         } else if (errorMessage != null) {
-
-            Text(
-                text = errorMessage ?: "Unable to load devices",
-                color = MaterialTheme.colorScheme.error
-            )
-
-        } else if (devices.isEmpty()) {
-
-            Text(
-                text = "No devices available."
-            )
-
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(
+                    text = errorMessage ?: "Unable to load devices",
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
         } else {
 
-            val filteredDevices =
-                when (selectedFloor) {
+            val filteredDevices = if (selectedFloorId == null) {
+                devices
+            } else {
+                devices.filter { it.floorId == selectedFloorId }
+            }
 
-                    "All Floors" ->
-                        devices
-
-                    "Ground Floor" ->
-                        devices.filter {
-                            it.floorId == "ground"
-                        }
-
-                    "First Floor" ->
-                        devices.filter {
-                            it.floorId == "first"
-                        }
-
-                    "Second Floor" ->
-                        devices.filter {
-                            it.floorId == "second"
-                        }
-
-                    "Third Floor" ->
-                        devices.filter {
-                            it.floorId == "third"
-                        }
-
-                    else ->
-                        devices
+            if (filteredDevices.isEmpty()) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("No devices found in this area.")
                 }
-
-            LazyColumn(
-                verticalArrangement =
-                    Arrangement.spacedBy(12.dp)
-            ) {
-
-                items(devices) { device ->
-
-                    DeviceCard(
-                        device = device,
-                        onToggle = {
-                            deviceViewModel.toggleDevice(device)
-                        }
-                    )
+            } else {
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    contentPadding = PaddingValues(bottom = 16.dp)
+                ) {
+                    items(filteredDevices) { device ->
+                        DeviceCard(
+                            device = device,
+                            onToggle = {
+                                deviceViewModel.toggleDevice(device)
+                            },
+                            onClick = {
+                                // Potentially open dialog
+                            }
+                        )
+                    }
                 }
             }
         }
@@ -340,25 +295,27 @@ fun HomeScreen(
 private fun DashboardStatCard(
     title: String,
     value: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
     modifier: Modifier = Modifier
 ) {
-
     Card(
-        modifier = modifier
+        modifier = modifier,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
     ) {
-
         Column(
             modifier = Modifier.padding(16.dp)
         ) {
-
+            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.height(8.dp))
             Text(
                 text = value,
-                style = MaterialTheme.typography.headlineMedium
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold
             )
-
             Text(
                 text = title,
-                style = MaterialTheme.typography.bodyMedium
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }

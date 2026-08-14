@@ -10,12 +10,13 @@ const {
   HttpsError,
 } = require("firebase-functions/v2/https");
 
-const admin = require("firebase-admin");
+const {initializeApp} = require("firebase-admin/app");
+const {getFirestore, FieldValue} = require("firebase-admin/firestore");
 const logger = require("firebase-functions/logger");
 
-admin.initializeApp();
+initializeApp();
 
-const db = admin.firestore();
+const db = getFirestore();
 
 setGlobalOptions({
   maxInstances: 10,
@@ -28,21 +29,6 @@ HELPER FUNCTIONS
 ============================================================
 */
 
-/**
- * Check whether a device status is valid.
- *
- * @param {string} status Device status to validate.
- * @return {boolean} True if the status is valid.
- */
-
-/**
- * Create a usage log for a device.
- *
- * @param {string} deviceId Firestore device document ID.
- * @param {Object} device Device data.
- * @param {string} action Action performed on the device.
- * @return {Promise<void>} Resolves when the usage log is created.
- */
 async function createUsageLog(deviceId, device, action) {
   await db.collection("usageLogs").add({
     deviceId: deviceId,
@@ -51,14 +37,10 @@ async function createUsageLog(deviceId, device, action) {
     roomId: device.roomId || null,
     floorId: device.floorId || null,
     action: action,
-    timestamp: admin.firestore.FieldValue.serverTimestamp(),
+    timestamp: FieldValue.serverTimestamp(),
   });
 }
 
-
-/**
- * Create an alert.
- */
 async function createAlert({
   deviceId,
   deviceName,
@@ -73,24 +55,14 @@ async function createAlert({
     severity: severity,
     message: message,
     acknowledged: false,
-    timestamp: admin.firestore.FieldValue.serverTimestamp(),
+    timestamp: FieldValue.serverTimestamp(),
   });
 }
-
 
 /*
 ============================================================
 1. DEVICE UPDATE LISTENER
 ============================================================
-
-Triggered whenever a device document changes.
-
-Responsibilities:
-
-- Detect ON/OFF changes
-- Record timestamps
-- Create usage logs
-- Support external simulator updates
 */
 
 exports.onDeviceUpdated = onDocumentUpdated(
@@ -98,7 +70,6 @@ exports.onDeviceUpdated = onDocumentUpdated(
     async (event) => {
       const before = event.data.before.data();
       const after = event.data.after.data();
-
       const deviceId = event.params.deviceId;
 
       if (!before || !after) {
@@ -109,64 +80,32 @@ exports.onDeviceUpdated = onDocumentUpdated(
 
       /*
       --------------------------------------------------------
-      DEVICE STATUS CHANGE
+      DEVICE STATUS CHANGE (Recursive Loop Protection)
       --------------------------------------------------------
       */
-
       if (before.status !== after.status) {
         logger.info(
             `Device ${deviceId}: ${before.status} -> ${after.status}`,
         );
 
-        /*
-        Device turned ON
-        */
+        const updates = {};
 
-        if (after.status === "ON") {
-          await db.collection("devices")
-              .doc(deviceId)
-              .update({
-                turnedOnAt:
-                  admin.firestore.FieldValue.serverTimestamp(),
-
-                lastStatusChange:
-                  admin.firestore.FieldValue.serverTimestamp(),
-
-                safetyCutoff: false,
-              });
-
-          await createUsageLog(
-              deviceId,
-              after,
-              "ON",
-          );
+        if (after.status === "ON" && !after.turnedOnAt) {
+          updates.turnedOnAt = FieldValue.serverTimestamp();
+          updates.lastStatusChange = FieldValue.serverTimestamp();
+          updates.safetyCutoff = false;
+          await createUsageLog(deviceId, after, "ON");
         }
 
-        /*
-        Device turned OFF
-        */
-
-        if (after.status === "OFF") {
-          await db.collection("devices")
-              .doc(deviceId)
-              .update({
-                turnedOffAt:
-                  admin.firestore.FieldValue.serverTimestamp(),
-
-                lastStatusChange:
-                  admin.firestore.FieldValue.serverTimestamp(),
-              });
-
-          await createUsageLog(
-              deviceId,
-              after,
-              "OFF",
-          );
+        if (after.status === "OFF" && !after.turnedOffAt) {
+          updates.turnedOffAt = FieldValue.serverTimestamp();
+          updates.lastStatusChange = FieldValue.serverTimestamp();
+          await createUsageLog(deviceId, after, "OFF");
         }
 
-        /*
-        ERROR state
-        */
+        if (Object.keys(updates).length > 0) {
+          await db.collection("devices").doc(deviceId).update(updates);
+        }
 
         if (after.status === "ERROR") {
           await createAlert({
@@ -174,14 +113,9 @@ exports.onDeviceUpdated = onDocumentUpdated(
             deviceName: after.name,
             type: "DEVICE_ERROR",
             severity: "MEDIUM",
-            message:
-              `${after.name || "Device"} reported an ERROR state.`,
+            message: `${after.name || "Device"} reported an ERROR state.`,
           });
         }
-
-        /*
-        DISCONNECTED state
-        */
 
         if (after.status === "DISCONNECTED") {
           await createAlert({
@@ -189,8 +123,7 @@ exports.onDeviceUpdated = onDocumentUpdated(
             deviceName: after.name,
             type: "DEVICE_DISCONNECTED",
             severity: "HIGH",
-            message:
-              `${after.name || "Device"} is disconnected.`,
+            message: `${after.name || "Device"} is disconnected.`,
           });
         }
       }
@@ -200,33 +133,23 @@ exports.onDeviceUpdated = onDocumentUpdated(
       MULTI-SWITCH CHANGES
       --------------------------------------------------------
       */
-
       if (
         after.type === "MULTI_SWITCH" &&
-        JSON.stringify(before.switches) !==
-        JSON.stringify(after.switches)
+        JSON.stringify(before.subSwitches) !== JSON.stringify(after.subSwitches)
       ) {
-        const beforeSwitches = before.switches || {};
-        const afterSwitches = after.switches || {};
+        const beforeSwitches = before.subSwitches || [];
+        const afterSwitches = after.subSwitches || [];
 
-        for (const switchId of Object.keys(afterSwitches)) {
-          const oldStatus =
-            beforeSwitches[switchId]?.status;
-
-          const newStatus =
-            afterSwitches[switchId]?.status;
-
-          if (oldStatus !== newStatus) {
+        for (const newSw of afterSwitches) {
+          const oldSw = beforeSwitches.find((s) => s.id === newSw.id);
+          if (!oldSw || oldSw.status !== newSw.status) {
             await createUsageLog(
                 deviceId,
                 {
                   ...after,
-                  name:
-                    `${after.name || "Multi Switch"} - ` +
-                    `${afterSwitches[switchId].name ||
-                    switchId}`,
+                  name: `${after.name || "Multi Switch"} - ${newSw.name || newSw.id}`,
                 },
-                newStatus,
+                newSw.status,
             );
           }
         }
@@ -236,25 +159,10 @@ exports.onDeviceUpdated = onDocumentUpdated(
     },
 );
 
-
 /*
 ============================================================
 2. SAFETY CUTOFF WORKER
 ============================================================
-
-Runs every minute.
-
-Checks devices such as:
-
-- Iron
-- Heater
-- High-power appliance
-
-If maximum ON duration is exceeded:
-
-ON -> OFF
-
-and an alert is generated.
 */
 
 exports.safetyCutoffWorker = onSchedule(
@@ -271,15 +179,10 @@ exports.safetyCutoffWorker = onSchedule(
           .get();
 
       if (snapshot.empty) {
-        logger.info(
-            "No safety-critical devices currently ON",
-        );
-
         return null;
       }
 
       const now = Date.now();
-
       const batch = db.batch();
 
       for (const document of snapshot.docs) {
@@ -289,120 +192,58 @@ exports.safetyCutoffWorker = onSchedule(
           continue;
         }
 
-        const turnedOnAt =
-          device.turnedOnAt.toDate().getTime();
+        const turnedOnAt = device.turnedOnAt.toDate().getTime();
+        const durationSeconds = (now - turnedOnAt) / 1000;
+        const maxDuration = Number(
+            device.maxOnDuration || device.maxDuration || 0,
+        );
 
-        const durationSeconds =
-          (now - turnedOnAt) / 1000;
-
-        const maxDuration =
-          Number(device.maxOnDuration || 0);
-
-        if (
-          maxDuration > 0 &&
-          durationSeconds >= maxDuration
-        ) {
-          logger.warn(
-              `Safety cutoff activated for ${document.id}`,
-          );
-
-          /*
-          Turn device OFF
-          */
+        if (maxDuration > 0 && durationSeconds >= maxDuration) {
+          logger.warn(`Safety cutoff activated for ${document.id}`);
 
           batch.update(document.ref, {
             status: "OFF",
-
             safetyCutoff: true,
-
-            safetyCutoffAt:
-              admin.firestore.FieldValue.serverTimestamp(),
-
-            lastStatusChange:
-              admin.firestore.FieldValue.serverTimestamp(),
-
-            turnedOffAt:
-              admin.firestore.FieldValue.serverTimestamp(),
+            safetyCutoffAt: FieldValue.serverTimestamp(),
+            lastStatusChange: FieldValue.serverTimestamp(),
+            turnedOffAt: FieldValue.serverTimestamp(),
           });
 
-          /*
-          Create alert
-          */
-
-          const alertRef =
-            db.collection("alerts").doc();
-
+          const alertRef = db.collection("alerts").doc();
           batch.set(alertRef, {
             deviceId: document.id,
-
-            deviceName:
-              device.name || "Unknown Device",
-
+            deviceName: device.name || "Unknown Device",
             type: "SAFETY_CUTOFF",
-
             severity: "HIGH",
-
             message:
               `${device.name || "Device"} was automatically ` +
-              `turned OFF because the maximum ON ` +
-              `duration was exceeded.`,
-
-            timestamp:
-              admin.firestore.FieldValue.serverTimestamp(),
-
+              `turned OFF because maximum ON duration was exceeded.`,
+            timestamp: FieldValue.serverTimestamp(),
             acknowledged: false,
           });
 
-          /*
-          Create usage log
-          */
-
-          const usageRef =
-            db.collection("usageLogs").doc();
-
+          const usageRef = db.collection("usageLogs").doc();
           batch.set(usageRef, {
             deviceId: document.id,
-
-            deviceName:
-              device.name || "Unknown Device",
-
-            deviceType:
-              device.type || "UNKNOWN",
-
-            roomId:
-              device.roomId || null,
-
-            floorId:
-              device.floorId || null,
-
+            deviceName: device.name || "Unknown Device",
+            deviceType: device.type || "UNKNOWN",
+            roomId: device.roomId || null,
+            floorId: device.floorId || null,
             action: "SAFETY_CUTOFF",
-
-            timestamp:
-              admin.firestore.FieldValue.serverTimestamp(),
+            timestamp: FieldValue.serverTimestamp(),
           });
         }
       }
 
       await batch.commit();
-
       return null;
     },
 );
-
 
 /*
 ============================================================
 3. AUTOMATIC LIGHT SCHEDULER
 ============================================================
-
-Example:
-
-schedule:
-{
-    enabled: true,
-    onTime: "18:00",
-    offTime: "23:00"
-}
 */
 
 exports.lightScheduleWorker = onSchedule(
@@ -411,12 +252,9 @@ exports.lightScheduleWorker = onSchedule(
       timeZone: "Asia/Colombo",
     },
     async () => {
-      logger.info(
-          "Running light schedule worker",
-      );
+      logger.info("Running light schedule worker");
 
       const snapshot = await db.collection("devices")
-          .where("type", "==", "LIGHT")
           .where("schedule.enabled", "==", true)
           .get();
 
@@ -424,388 +262,145 @@ exports.lightScheduleWorker = onSchedule(
         return null;
       }
 
-      /*
-      Current Sri Lankan time
-      */
-
       const now = new Date();
-
-      const currentTime =
-        now.toLocaleTimeString(
-            "en-GB",
-            {
-              timeZone: "Asia/Colombo",
-              hour: "2-digit",
-              minute: "2-digit",
-              hour12: false,
-            },
-        );
-
-      logger.info(
-          `Current time: ${currentTime}`,
-      );
+      const currentTime = now.toLocaleTimeString("en-GB", {
+        timeZone: "Asia/Colombo",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      });
 
       const batch = db.batch();
 
       for (const document of snapshot.docs) {
         const device = document.data();
-
         const schedule = device.schedule;
 
-        if (!schedule) {
-          continue;
-        }
+        if (!schedule) continue;
 
-        /*
-        Turn ON
-        */
-
-        if (
-          schedule.onTime === currentTime &&
-          device.status !== "ON"
-        ) {
+        if (schedule.onTime === currentTime && device.status !== "ON") {
           batch.update(document.ref, {
             status: "ON",
-
             scheduledAction: "ON",
-
-            lastStatusChange:
-              admin.firestore.FieldValue.serverTimestamp(),
+            lastStatusChange: FieldValue.serverTimestamp(),
           });
-
-          logger.info(
-              `Scheduled ON: ${document.id}`,
-          );
         }
 
-        /*
-        Turn OFF
-        */
-
-        if (
-          schedule.offTime === currentTime &&
-          device.status !== "OFF"
-        ) {
+        if (schedule.offTime === currentTime && device.status !== "OFF") {
           batch.update(document.ref, {
             status: "OFF",
-
             scheduledAction: "OFF",
-
-            lastStatusChange:
-              admin.firestore.FieldValue.serverTimestamp(),
+            lastStatusChange: FieldValue.serverTimestamp(),
           });
-
-          logger.info(
-              `Scheduled OFF: ${document.id}`,
-          );
         }
       }
 
       await batch.commit();
-
       return null;
     },
 );
 
-
 /*
 ============================================================
-4. MOBILE APP - TOGGLE DEVICE
-============================================================
-
-Android calls:
-
-toggleDevice({
-    deviceId: "device001",
-    status: "ON"
-})
-*/
-
-exports.toggleDevice = onCall(
-    async (request) => {
-      const data = request.data || {};
-
-      const deviceId = data.deviceId;
-      const newStatus = data.status;
-
-      if (!deviceId) {
-        throw new HttpsError(
-            "invalid-argument",
-            "deviceId is required",
-        );
-      }
-
-      if (
-        newStatus !== "ON" &&
-        newStatus !== "OFF"
-      ) {
-        throw new HttpsError(
-            "invalid-argument",
-            "status must be ON or OFF",
-        );
-      }
-
-      const deviceRef =
-        db.collection("devices").doc(deviceId);
-
-      const deviceSnapshot =
-        await deviceRef.get();
-
-      if (!deviceSnapshot.exists) {
-        throw new HttpsError(
-            "not-found",
-            "Device does not exist",
-        );
-      }
-
-      const device =
-        deviceSnapshot.data();
-
-      /*
-      Prevent manually turning off
-      disconnected device etc.
-      */
-
-      if (
-        device.status === "DISCONNECTED" &&
-        newStatus === "ON"
-      ) {
-        throw new HttpsError(
-            "failed-precondition",
-            "Device is disconnected",
-        );
-      }
-
-      await deviceRef.update({
-        status: newStatus,
-
-        source: "mobile",
-
-        lastStatusChange:
-          admin.firestore.FieldValue.serverTimestamp(),
-      });
-
-      return {
-        success: true,
-
-        deviceId: deviceId,
-
-        status: newStatus,
-      };
-    },
-);
-
-
-/*
-============================================================
-5. MULTI-SWITCH CONTROL
-============================================================
-
-Controls one switch inside a multi-switch unit.
-*/
-
-exports.toggleSwitch = onCall(
-    async (request) => {
-      const data = request.data || {};
-
-      const deviceId = data.deviceId;
-      const switchId = data.switchId;
-      const newStatus = data.status;
-
-      if (!deviceId || !switchId) {
-        throw new HttpsError(
-            "invalid-argument",
-            "deviceId and switchId are required",
-        );
-      }
-
-      if (
-        newStatus !== "ON" &&
-        newStatus !== "OFF"
-      ) {
-        throw new HttpsError(
-            "invalid-argument",
-            "status must be ON or OFF",
-        );
-      }
-
-      const deviceRef =
-        db.collection("devices").doc(deviceId);
-
-      const deviceSnapshot =
-        await deviceRef.get();
-
-      if (!deviceSnapshot.exists) {
-        throw new HttpsError(
-            "not-found",
-            "Device does not exist",
-        );
-      }
-
-      const device =
-        deviceSnapshot.data();
-
-      if (device.type !== "MULTI_SWITCH") {
-        throw new HttpsError(
-            "failed-precondition",
-            "Device is not a multi-switch unit",
-        );
-      }
-
-      const switches =
-        device.switches || {};
-
-      if (!switches[switchId]) {
-        throw new HttpsError(
-            "not-found",
-            "Switch does not exist",
-        );
-      }
-
-      switches[switchId].status =
-        newStatus;
-
-      await deviceRef.update({
-        switches: switches,
-
-        lastStatusChange:
-          admin.firestore.FieldValue.serverTimestamp(),
-
-        source: "mobile",
-      });
-
-      return {
-        success: true,
-
-        deviceId: deviceId,
-
-        switchId: switchId,
-
-        status: newStatus,
-      };
-    },
-);
-
-
-/*
-============================================================
-6. ACKNOWLEDGE ALERT
+4. MOBILE APP CALLABLES
 ============================================================
 */
 
-exports.acknowledgeAlert = onCall(
-    async (request) => {
-      const data = request.data || {};
+exports.toggleDevice = onCall(async (request) => {
+  const data = request.data || {};
+  const {deviceId, status: newStatus} = data;
 
-      const alertId = data.alertId;
+  if (!deviceId || (newStatus !== "ON" && newStatus !== "OFF")) {
+    throw new HttpsError("invalid-argument", "Valid deviceId and status required");
+  }
 
-      if (!alertId) {
-        throw new HttpsError(
-            "invalid-argument",
-            "alertId is required",
-        );
-      }
+  const deviceRef = db.collection("devices").doc(deviceId);
+  const deviceSnapshot = await deviceRef.get();
 
-      const alertRef =
-        db.collection("alerts").doc(alertId);
+  if (!deviceSnapshot.exists) {
+    throw new HttpsError("not-found", "Device does not exist");
+  }
 
-      const alertSnapshot =
-        await alertRef.get();
+  if (deviceSnapshot.data().status === "DISCONNECTED" && newStatus === "ON") {
+    throw new HttpsError("failed-precondition", "Device is disconnected");
+  }
 
-      if (!alertSnapshot.exists) {
-        throw new HttpsError(
-            "not-found",
-            "Alert does not exist",
-        );
-      }
+  await deviceRef.update({
+    status: newStatus,
+    source: "mobile",
+    lastStatusChange: FieldValue.serverTimestamp(),
+  });
 
-      await alertRef.update({
-        acknowledged: true,
+  return {success: true, deviceId, status: newStatus};
+});
 
-        acknowledgedAt:
-          admin.firestore.FieldValue.serverTimestamp(),
-      });
+exports.toggleSwitch = onCall(async (request) => {
+  const data = request.data || {};
+  const {deviceId, switchId, status: newStatus} = data;
 
-      return {
-        success: true,
+  if (!deviceId || switchId === undefined || (newStatus !== "ON" && newStatus !== "OFF")) {
+    throw new HttpsError("invalid-argument", "Valid arguments required");
+  }
 
-        alertId: alertId,
-      };
-    },
-);
+  const deviceRef = db.collection("devices").doc(deviceId);
+  const deviceSnapshot = await deviceRef.get();
 
+  if (!deviceSnapshot.exists) {
+    throw new HttpsError("not-found", "Device does not exist");
+  }
 
-/*
-============================================================
-7. GET DEVICE USAGE
-============================================================
-*/
+  const device = deviceSnapshot.data();
+  const subSwitches = device.subSwitches || [];
+  const targetIndex = subSwitches.findIndex((s) => s.id === switchId);
 
-exports.getDeviceUsage = onCall(
-    async (request) => {
-      const data = request.data || {};
+  if (targetIndex === -1) {
+    throw new HttpsError("not-found", "Switch does not exist");
+  }
 
-      const deviceId = data.deviceId;
+  subSwitches[targetIndex].status = newStatus;
 
-      if (!deviceId) {
-        throw new HttpsError(
-            "invalid-argument",
-            "deviceId is required",
-        );
-      }
+  await deviceRef.update({
+    subSwitches: subSwitches,
+    lastStatusChange: FieldValue.serverTimestamp(),
+    source: "mobile",
+  });
 
-      const snapshot =
-        await db.collection("usageLogs")
-            .where("deviceId", "==", deviceId)
-            .orderBy("timestamp", "desc")
-            .limit(100)
-            .get();
+  return {success: true, deviceId, switchId, status: newStatus};
+});
 
-      const logs = [];
+exports.acknowledgeAlert = onCall(async (request) => {
+  const alertId = request.data?.alertId;
+  if (!alertId) throw new HttpsError("invalid-argument", "alertId required");
 
-      snapshot.forEach((doc) => {
-        logs.push({
-          id: doc.id,
-          ...doc.data(),
-        });
-      });
+  await db.collection("alerts").doc(alertId).update({
+    acknowledged: true,
+    acknowledgedAt: FieldValue.serverTimestamp(),
+  });
 
-      return {
-        success: true,
-        deviceId: deviceId,
-        logs: logs,
-      };
-    },
-);
+  return {success: true, alertId};
+});
 
+exports.getDeviceUsage = onCall(async (request) => {
+  const deviceId = request.data?.deviceId;
+  if (!deviceId) throw new HttpsError("invalid-argument", "deviceId required");
 
-/*
-============================================================
-8. GET ACTIVE ALERTS
-============================================================
-*/
+  const snapshot = await db.collection("usageLogs")
+      .where("deviceId", "==", deviceId)
+      .orderBy("timestamp", "desc")
+      .limit(100)
+      .get();
 
-exports.getActiveAlerts = onCall(
-    async () => {
-      const snapshot =
-        await db.collection("alerts")
-            .where("acknowledged", "==", false)
-            .orderBy("timestamp", "desc")
-            .limit(50)
-            .get();
+  const logs = snapshot.docs.map((doc) => ({id: doc.id, ...doc.data()}));
+  return {success: true, deviceId, logs};
+});
 
-      const alerts = [];
+exports.getActiveAlerts = onCall(async () => {
+  const snapshot = await db.collection("alerts")
+      .where("acknowledged", "==", false)
+      .orderBy("timestamp", "desc")
+      .limit(50)
+      .get();
 
-      snapshot.forEach((doc) => {
-        alerts.push({
-          id: doc.id,
-          ...doc.data(),
-        });
-      });
-
-      return {
-        success: true,
-        alerts: alerts,
-      };
-    },
-);
+  const alerts = snapshot.docs.map((doc) => ({id: doc.id, ...doc.data()}));
+  return {success: true, alerts};
+});

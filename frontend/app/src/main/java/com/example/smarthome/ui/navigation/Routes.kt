@@ -8,4 +8,5 @@ object Routes {
     const val REPORTS = "reports"
 
     const val FLOOR_PLAN = "floor_plan/{floorId}/{floorName}"
+    const val ADD_FLOOR = "add_floor"
 }
