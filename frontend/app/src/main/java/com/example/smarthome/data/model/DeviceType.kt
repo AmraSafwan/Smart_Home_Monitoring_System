@@ -5,5 +5,6 @@ enum class DeviceType {
     LIGHT,
     MULTI_SWITCH,
     SAFETY_DEVICE,
+    IRON, // Added to directly parse "type": "IRON" from Firestore
     CAMERA
 }
