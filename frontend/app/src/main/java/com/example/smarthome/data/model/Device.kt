@@ -96,7 +96,8 @@ data class Device(
     val endTime: String?
         get() = schedule?.offTime
 }
-// Add this extension property at the bottom of Device.kt
+
+// Extension properties and helpers
 val Device.powerRatingWatts: Double
     get() = when (this.type) {
         DeviceType.LIGHT -> 15.0
@@ -105,6 +106,8 @@ val Device.powerRatingWatts: Double
         DeviceType.SAFETY_DEVICE -> 1500.0 // e.g., Clothing Iron
         else -> 50.0
     }
+
+fun Device.getWattage(): Double = powerRatingWatts
 
 /**
  * Calculates current accrued Wh:
