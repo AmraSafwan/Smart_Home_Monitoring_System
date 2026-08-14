@@ -1,5 +1,6 @@
 package com.example.smarthome.ui.device
-
+import coil.compose.AsyncImage
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -79,7 +80,6 @@ fun DeviceControlDialog(
                         PowerControl(isOn = device.status == DeviceStatus.ON, onToggle = onToggle)
                         HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
-                        // Calculate initial minutes from maxDuration (seconds) or maxOnDurationMinutes
                         val currentMinutes = device.maxOnDurationMinutes
                             ?: ((device.maxDuration ?: 300L) / 60).toInt()
 
@@ -89,7 +89,12 @@ fun DeviceControlDialog(
                         )
                     }
                     DeviceType.CAMERA -> {
-                        CameraMockStream(streamUri = device.streamUri ?: device.lastSnapshotUrl)
+                        PowerControl(isOn = device.status == DeviceStatus.ON, onToggle = onToggle)
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                        CameraMockStream(
+                            streamUri = device.streamUrl ?: device.lastSnapshotUrl,
+                            isOn = device.status == DeviceStatus.ON
+                        )
                     }
                 }
             }
@@ -124,13 +129,21 @@ fun StatusIndicator(status: DeviceStatus) {
 
 @Composable
 fun PowerControl(isOn: Boolean, onToggle: () -> Unit) {
+    var checkedState by remember(isOn) { mutableStateOf(isOn) }
+
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text("Main Power", style = MaterialTheme.typography.titleMedium)
-        Switch(checked = isOn, onCheckedChange = { onToggle() })
+        Switch(
+            checked = checkedState,
+            onCheckedChange = {
+                checkedState = it
+                onToggle()
+            }
+        )
     }
 }
 
@@ -152,9 +165,13 @@ fun MultiSwitchControl(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(sw.name)
+                var subCheckedState by remember(sw.status) { mutableStateOf(sw.status == DeviceStatus.ON) }
                 Switch(
-                    checked = sw.status == DeviceStatus.ON,
-                    onCheckedChange = { onToggle(sw.id) }
+                    checked = subCheckedState,
+                    onCheckedChange = {
+                        subCheckedState = it
+                        onToggle(sw.id)
+                    }
                 )
             }
         }
@@ -163,7 +180,7 @@ fun MultiSwitchControl(
 
 @Composable
 fun SafetyConfigControl(maxDuration: Int, onSave: (Int) -> Unit) {
-    var textValue by remember { mutableStateOf(maxDuration.toString()) }
+    var textValue by remember(maxDuration) { mutableStateOf(maxDuration.toString()) }
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("Safety Cutoff Config", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
@@ -197,9 +214,9 @@ fun SchedulingControl(
     endTime: String,
     onUpdate: (Boolean, String, String) -> Unit
 ) {
-    var isScheduleEnabled by remember { mutableStateOf(enabled) }
-    var start by remember { mutableStateOf(startTime) }
-    var end by remember { mutableStateOf(endTime) }
+    var isScheduleEnabled by remember(enabled) { mutableStateOf(enabled) }
+    var start by remember(startTime) { mutableStateOf(startTime) }
+    var end by remember(endTime) { mutableStateOf(endTime) }
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(
@@ -242,7 +259,7 @@ fun SchedulingControl(
 }
 
 @Composable
-fun CameraMockStream(streamUri: String?) {
+fun CameraMockStream(streamUri: String?, isOn: Boolean) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -251,10 +268,18 @@ fun CameraMockStream(streamUri: String?) {
             .background(Color.Black),
         contentAlignment = Alignment.Center
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(Icons.Default.Videocam, contentDescription = null, tint = Color.White, modifier = Modifier.size(48.dp))
-            Text("Live Stream Feed", color = Color.White)
-            Text("URI: ${streamUri ?: "rtsp://mock.camera.local/stream1"}", color = Color.Gray, fontSize = 10.sp)
+        if (isOn) {
+            AsyncImage(
+                model = streamUri ?: "https://picsum.photos/seed/front_door/800/450",
+                contentDescription = "Dialog Stream",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(Icons.Default.VideocamOff, contentDescription = null, tint = Color.White, modifier = Modifier.size(48.dp))
+                Text("CAMERA OFFLINE", color = Color.White, fontWeight = FontWeight.Bold)
+            }
         }
     }
 }

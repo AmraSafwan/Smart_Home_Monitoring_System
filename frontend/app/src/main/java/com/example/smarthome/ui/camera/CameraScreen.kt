@@ -30,7 +30,6 @@ import com.example.smarthome.data.model.Device
 import com.example.smarthome.data.model.DeviceStatus
 import com.example.smarthome.data.model.DeviceType
 import com.example.smarthome.viewmodel.DeviceViewModel
-import kotlin.math.abs
 
 @Composable
 fun CameraScreen(
@@ -38,7 +37,6 @@ fun CameraScreen(
 ) {
     val devices by deviceViewModel.devices
 
-    // Memoize camera filtering so it only recalculates when devices change
     val cameras = remember(devices) {
         devices.filter { it.type == DeviceType.CAMERA }
     }
@@ -108,6 +106,8 @@ fun CameraScreen(
                 ) { camera ->
                     CameraFeedCard(
                         camera = camera,
+                        onTogglePower = { deviceViewModel.toggleDevice(camera) },
+                        onCaptureSnapshot = { deviceViewModel.captureNewSnapshot(camera.id) },
                         onViewFullscreen = { selectedCameraForFullscreen = camera }
                     )
                 }
@@ -127,15 +127,15 @@ fun CameraScreen(
 @Composable
 fun CameraFeedCard(
     camera: Device,
+    onTogglePower: () -> Unit,
+    onCaptureSnapshot: () -> Unit,
     onViewFullscreen: () -> Unit
 ) {
     var isLive by remember { mutableStateOf(true) }
-    var refreshTrigger by remember { mutableStateOf(0) }
 
-    // Safe seed creation from string IDs
-    val seed = abs((camera.id + refreshTrigger).hashCode())
-    // Reduced resolution to prevent RAM spikes on emulator
-    val mockImageUrl = "https://picsum.photos/seed/$seed/400/225"
+    // Read directly from Firebase streamUrl or fallback to lastSnapshotUrl
+    val imageUrl = camera.streamUrl ?: camera.lastSnapshotUrl ?: "https://picsum.photos/seed/front_door/800/450"
+    val isPoweredOn = camera.status == DeviceStatus.ON
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -150,13 +150,13 @@ fun CameraFeedCard(
                     .fillMaxWidth()
                     .height(220.dp)
                     .background(Color.Black)
-                    .clickable { onViewFullscreen() },
+                    .clickable(enabled = isPoweredOn) { onViewFullscreen() },
                 contentAlignment = Alignment.Center
             ) {
-                if (isLive) {
+                if (isPoweredOn && isLive) {
                     AsyncImage(
                         model = ImageRequest.Builder(LocalContext.current)
-                            .data(mockImageUrl)
+                            .data(imageUrl)
                             .crossfade(true)
                             .build(),
                         contentDescription = "Camera Stream",
@@ -166,13 +166,14 @@ fun CameraFeedCard(
                 } else {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(
-                            imageVector = Icons.Default.PauseCircle,
+                            imageVector = if (!isPoweredOn) Icons.Default.VideocamOff else Icons.Default.PauseCircle,
                             contentDescription = null,
                             tint = Color.White.copy(alpha = 0.6f),
                             modifier = Modifier.size(48.dp)
                         )
+                        Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = "STREAM PAUSED",
+                            text = if (!isPoweredOn) "CAMERA OFFLINE" else "STREAM PAUSED",
                             color = Color.White.copy(alpha = 0.6f),
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold
@@ -213,11 +214,11 @@ fun CameraFeedCard(
                                 modifier = Modifier
                                     .size(8.dp)
                                     .clip(CircleShape)
-                                    .background(if (isLive && camera.status == DeviceStatus.ON) Color.Red else Color.Gray)
+                                    .background(if (isPoweredOn && isLive) Color.Red else Color.Gray)
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = if (isLive && camera.status == DeviceStatus.ON) "LIVE" else "OFFLINE",
+                                text = if (isPoweredOn && isLive) "LIVE" else "OFFLINE",
                                 color = Color.White,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 10.sp
@@ -225,18 +226,34 @@ fun CameraFeedCard(
                         }
                     }
 
-                    // Bottom Right Quick Fullscreen Floating Button
-                    IconButton(
-                        onClick = onViewFullscreen,
-                        modifier = Modifier
-                            .align(Alignment.BottomEnd)
-                            .background(Color.Black.copy(alpha = 0.6f), CircleShape)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Fullscreen,
-                            contentDescription = "Fullscreen",
-                            tint = Color.White
-                        )
+                    if (isPoweredOn) {
+                        // Bottom Right Action Bar (Snapshot + Fullscreen)
+                        Row(
+                            modifier = Modifier.align(Alignment.BottomEnd),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            IconButton(
+                                onClick = onCaptureSnapshot,
+                                modifier = Modifier.background(Color.Black.copy(alpha = 0.6f), CircleShape)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.PhotoCamera,
+                                    contentDescription = "Capture Snapshot",
+                                    tint = Color.White
+                                )
+                            }
+
+                            IconButton(
+                                onClick = onViewFullscreen,
+                                modifier = Modifier.background(Color.Black.copy(alpha = 0.6f), CircleShape)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Fullscreen,
+                                    contentDescription = "Fullscreen",
+                                    tint = Color.White
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -250,27 +267,29 @@ fun CameraFeedCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = { isLive = !isLive }) {
+                    IconButton(
+                        onClick = { isLive = !isLive },
+                        enabled = isPoweredOn
+                    ) {
                         Icon(
                             imageVector = if (isLive) Icons.Default.Pause else Icons.Default.PlayArrow,
                             contentDescription = "Toggle Stream"
                         )
                     }
-                    IconButton(onClick = { refreshTrigger++ }) {
-                        Icon(
-                            imageVector = Icons.Default.Cameraswitch,
-                            contentDescription = "Refresh Snapshot"
-                        )
-                    }
                 }
 
-                TextButton(onClick = onViewFullscreen) {
-                    Text("Fullscreen")
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Icon(
-                        imageVector = Icons.Default.ArrowForward,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp)
+                // Power Toggle Switch
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = if (isPoweredOn) "ON" else "OFF",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isPoweredOn) Color(0xFF4CAF50) else Color.Gray
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Switch(
+                        checked = isPoweredOn,
+                        onCheckedChange = { onTogglePower() }
                     )
                 }
             }
@@ -283,7 +302,7 @@ fun FullscreenCameraDialog(
     camera: Device,
     onDismiss: () -> Unit
 ) {
-    val seed = abs(camera.id.hashCode())
+    val imageUrl = camera.streamUrl ?: camera.lastSnapshotUrl ?: "https://picsum.photos/seed/front_door/800/450"
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -294,10 +313,9 @@ fun FullscreenCameraDialog(
             color = Color.Black
         ) {
             Box(modifier = Modifier.fillMaxSize()) {
-                // Fullscreen Mock Video Feed
                 AsyncImage(
                     model = ImageRequest.Builder(LocalContext.current)
-                        .data("https://picsum.photos/seed/$seed/1280/720")
+                        .data(imageUrl)
                         .crossfade(true)
                         .build(),
                     contentDescription = "Fullscreen Camera Stream",
@@ -337,43 +355,6 @@ fun FullscreenCameraDialog(
                             contentDescription = "Close",
                             tint = Color.White
                         )
-                    }
-                }
-
-                // Bottom Controls Bar
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(32.dp)
-                        .align(Alignment.BottomCenter),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    IconButton(
-                        onClick = { /* Snapshot logic */ },
-                        modifier = Modifier
-                            .size(56.dp)
-                            .background(Color.White.copy(alpha = 0.2f), CircleShape)
-                    ) {
-                        Icon(Icons.Default.PhotoCamera, contentDescription = "Take Snapshot", tint = Color.White)
-                    }
-
-                    IconButton(
-                        onClick = { /* Mic logic */ },
-                        modifier = Modifier
-                            .size(56.dp)
-                            .background(Color.White.copy(alpha = 0.2f), CircleShape)
-                    ) {
-                        Icon(Icons.Default.Mic, contentDescription = "Talkback", tint = Color.White)
-                    }
-
-                    IconButton(
-                        onClick = { /* Settings logic */ },
-                        modifier = Modifier
-                            .size(56.dp)
-                            .background(Color.White.copy(alpha = 0.2f), CircleShape)
-                    ) {
-                        Icon(Icons.Default.Settings, contentDescription = "Camera Settings", tint = Color.White)
                     }
                 }
             }

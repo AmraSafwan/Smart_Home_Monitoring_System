@@ -23,8 +23,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.example.smarthome.data.model.Device
-import com.example.smarthome.data.model.UsageLog
+import com.example.smarthome.data.model.*
 import com.example.smarthome.viewmodel.DeviceViewModel
 import java.text.SimpleDateFormat
 import java.util.*
@@ -70,27 +69,31 @@ fun ReportsScreen(
                     fontWeight = FontWeight.Bold
                 )
                 Spacer(modifier = Modifier.height(12.dp))
-                
-                val totalConsumption = devices.sumOf { it.energyConsumptionWh }
+
+                val totalConsumption = devices.sumOf { it.totalCalculatedWh }
                 TotalUsageCard(totalWh = totalConsumption)
-                
+
                 Spacer(modifier = Modifier.height(16.dp))
-                
+
                 Text(
                     text = "Device Breakdown",
                     style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                
+
                 Spacer(modifier = Modifier.height(8.dp))
-                
+
+                val displayDevices = devices
+                    .filter { it.totalCalculatedWh > 0 || it.status == DeviceStatus.ON }
+                    .sortedByDescending { it.totalCalculatedWh }
+
                 // Horizontal scroll for device breakdown
                 LazyRow(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    items(devices.filter { it.energyConsumptionWh > 0 }.sortedByDescending { it.energyConsumptionWh }) { device ->
-                        CompactDeviceUsageCard(device, totalConsumption)
+                    items(displayDevices.size) { index ->
+                        CompactDeviceUsageCard(displayDevices[index], totalConsumption)
                     }
                 }
             }
@@ -115,7 +118,12 @@ fun ReportsScreen(
 
         if (usageLogs.isEmpty()) {
             item {
-                Box(modifier = Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(24.dp),
+                    contentAlignment = Alignment.Center
+                ) {
                     Text("No recent activity logs available.", color = MaterialTheme.colorScheme.outline)
                 }
             }
@@ -171,8 +179,9 @@ fun TotalUsageCard(totalWh: Double) {
 
 @Composable
 fun CompactDeviceUsageCard(device: Device, totalWh: Double) {
-    val percentage = if (totalWh > 0) (device.energyConsumptionWh / totalWh).toFloat() else 0f
-    
+    val deviceWh = device.totalCalculatedWh
+    val percentage = if (totalWh > 0) (deviceWh / totalWh).toFloat() else 0f
+
     Card(
         modifier = Modifier.width(160.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
@@ -184,7 +193,7 @@ fun CompactDeviceUsageCard(device: Device, totalWh: Double) {
                 maxLines = 1
             )
             Text(
-                text = String.format("%.1f Wh", device.energyConsumptionWh),
+                text = String.format("%.1f Wh", deviceWh),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.primary
             )

@@ -1,4 +1,6 @@
 package com.example.smarthome.viewmodel
+import com.google.firebase.Firebase
+import com.google.firebase.firestore.firestore
 
 import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.ViewModel
@@ -129,21 +131,15 @@ class DeviceViewModel : ViewModel() {
     }
 
     fun toggleDevice(device: Device) {
-        val newStatus = if (device.status == DeviceStatus.ON) {
-            DeviceStatus.OFF
-        } else {
-            DeviceStatus.ON
-        }
-
-        repository.updateDeviceStatus(
-            deviceId = device.id,
-            status = newStatus,
-            onComplete = { success ->
-                if (!success) {
-                    errorMessage.value = "Failed to update device status"
-                }
-            }
+        val isTurningOn = device.status != DeviceStatus.ON
+        val updates = mutableMapOf<String, Any?>(
+            "status" to if (isTurningOn) DeviceStatus.ON.name else DeviceStatus.OFF.name,
+            "turnedOnAt" to if (isTurningOn) com.google.firebase.Timestamp.now() else null
         )
+
+        Firebase.firestore.collection("devices")
+            .document(device.id)
+            .update(updates)
     }
 
     fun toggleSubSwitch(
@@ -232,4 +228,41 @@ class DeviceViewModel : ViewModel() {
         safetyCutoffJobs.values.forEach { it.cancel() }
         safetyCutoffJobs.clear()
     }
+
+    fun captureNewSnapshot(deviceId: String) {
+        val newSeed = System.currentTimeMillis()
+        val newSnapshotUrl = "https://picsum.photos/seed/$newSeed/800/450"
+
+        Firebase.firestore.collection("devices")
+            .document(deviceId)
+            .update(
+                mapOf(
+                    "streamUrl" to newSnapshotUrl,
+                    "lastSnapshotUrl" to newSnapshotUrl,
+                    "lastStatusChange" to com.google.firebase.Timestamp.now()
+                )
+            )
+    }
+    fun calculateTotalKwh(devices: List<Device>, usageLogs: List<UsageLog>): Double {
+        var totalKwh = 0.0
+
+        // 1. Calculate energy for currently active (ON) devices
+        val now = System.currentTimeMillis()
+        devices.filter { it.status == DeviceStatus.ON }.forEach { device ->
+            val startTime = device.turnedOnAt?.time ?: now
+            val activeHours = (now - startTime) / (1000.0 * 60.0 * 60.0)
+            val watts = device.getWattage()
+            totalKwh += (watts * activeHours) / 1000.0
+        }
+
+        // 2. Add energy from historical usage logs (if logs store duration in seconds)
+        usageLogs.forEach { log ->
+            val durationHours = (log.durationSeconds ?: 0L) / 3600.0
+            val watts = log.wattage ?: 100.0
+            totalKwh += (watts * durationHours) / 1000.0
+        }
+
+        return totalKwh
+    }
+
 }
