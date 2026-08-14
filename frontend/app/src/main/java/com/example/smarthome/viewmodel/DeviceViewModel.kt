@@ -8,11 +8,15 @@ import androidx.lifecycle.viewModelScope
 import com.example.smarthome.data.model.Device
 import com.example.smarthome.data.model.DeviceStatus
 import com.example.smarthome.data.model.UsageLog
+import com.example.smarthome.data.model.getWattage
 import com.example.smarthome.data.repository.DeviceRepository
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
+import java.util.Locale
 
 class DeviceViewModel : ViewModel() {
 
@@ -33,6 +37,16 @@ class DeviceViewModel : ViewModel() {
 
     init {
         observeAllDevices()
+        startPeriodicScheduleCheck()
+    }
+
+    private fun startPeriodicScheduleCheck() {
+        viewModelScope.launch {
+            while (true) {
+                checkSchedules(devices.value)
+                delay(60000) // Check every minute
+            }
+        }
     }
 
     fun observeAllDevices() {
@@ -44,6 +58,7 @@ class DeviceViewModel : ViewModel() {
                 isLoading.value = false
                 errorMessage.value = null
                 checkSafetyCutoffs(deviceList)
+                checkSchedules(deviceList)
             },
             onError = { exception ->
                 isLoading.value = false
@@ -110,6 +125,36 @@ class DeviceViewModel : ViewModel() {
             }
         }
         safetyCutoffJobs.remove(device.id)
+    }
+
+    private fun checkSchedules(deviceList: List<Device>) {
+        val now = Calendar.getInstance()
+        val currentTimeString = SimpleDateFormat("HH:mm", Locale.getDefault()).format(now.time)
+
+        deviceList.filter { it.autoScheduleEnabled }.forEach { device ->
+            val startTime = device.startTime // e.g., "18:00"
+            val endTime = device.endTime     // e.g., "06:00"
+
+            if (startTime != null && endTime != null) {
+                val shouldBeOn = isTimeInInterval(currentTimeString, startTime, endTime)
+                val isCurrentlyOn = device.status == DeviceStatus.ON
+
+                if (shouldBeOn && !isCurrentlyOn) {
+                    repository.updateDeviceStatus(device.id, DeviceStatus.ON) { }
+                } else if (!shouldBeOn && isCurrentlyOn) {
+                    repository.updateDeviceStatus(device.id, DeviceStatus.OFF) { }
+                }
+            }
+        }
+    }
+
+    private fun isTimeInInterval(current: String, start: String, end: String): Boolean {
+        return if (start <= end) {
+            current >= start && current < end
+        } else {
+            // Overnights, e.g., 22:00 to 06:00
+            current >= start || current < end
+        }
     }
 
     fun observeDevicesByFloor(floorId: String) {

@@ -14,6 +14,9 @@ data class UsageLog(
     val floorId: String? = null,
     val action: String = "", // e.g., "ON", "OFF", "SAFETY_CUTOFF"
 
+    val wattage: Double? = null,
+    val durationSeconds: Long? = null,
+
     @ServerTimestamp
     val timestamp: Date? = null
 )
