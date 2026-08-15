@@ -88,26 +88,36 @@ function App() {
               <div style={{ marginTop: '10px' }}>
                 <p><strong>Gang Box Switches:</strong></p>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                  {(device.switches || [false, false, false]).map((swState, idx) => (
-                    <button 
-                      key={idx} 
-                      onClick={() => {
-                        const updatedSwitches = [...(device.switches || [false, false, false])];
-                        updatedSwitches[idx] = !updatedSwitches[idx];
-                        updateDeviceData(device.id, { switches: updatedSwitches });
-                      }}
-                      style={{ 
-                        padding: '6px 12px',
-                        cursor: 'pointer',
-                        borderRadius: '4px',
-                        border: '1px solid #999',
-                        backgroundColor: swState ? '#4caf50' : '#e0e0e0',
-                        color: swState ? '#fff' : '#000'
-                      }}
-                    >
-                      Switch {idx + 1}: {swState ? 'ON' : 'OFF'}
-                    </button>
-                  ))}
+                  {((device.subSwitches && device.subSwitches.length ? device.subSwitches : [
+                    { id: 1, name: 'Switch 1', status: 'OFF' },
+                    { id: 2, name: 'Switch 2', status: 'OFF' },
+                    { id: 3, name: 'Switch 3', status: 'OFF' }
+                  ])).map((switchItem, idx) => {
+                    const swState = switchItem.status === 'ON';
+                    return (
+                      <button 
+                        key={switchItem.id ?? idx} 
+                        onClick={() => {
+                          const updatedSwitches = (device.subSwitches && device.subSwitches.length ? device.subSwitches : [
+                            { id: 1, name: 'Switch 1', status: 'OFF' },
+                            { id: 2, name: 'Switch 2', status: 'OFF' },
+                            { id: 3, name: 'Switch 3', status: 'OFF' }
+                          ]).map((item, i) => i === idx ? { ...item, status: swState ? 'OFF' : 'ON' } : item);
+                          updateDeviceData(device.id, { subSwitches: updatedSwitches });
+                        }}
+                        style={{ 
+                          padding: '6px 12px',
+                          cursor: 'pointer',
+                          borderRadius: '4px',
+                          border: '1px solid #999',
+                          backgroundColor: swState ? '#4caf50' : '#e0e0e0',
+                          color: swState ? '#fff' : '#000'
+                        }}
+                      >
+                        {switchItem.name || `Switch ${idx + 1}`}: {swState ? 'ON' : 'OFF'}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 

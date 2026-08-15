@@ -7,6 +7,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
@@ -20,6 +21,7 @@ import com.example.smarthome.data.model.DeviceType
 fun DeviceCard(
     device: Device,
     onToggle: () -> Unit,
+    onSubToggle: (Int) -> Unit = {},
     onClick: () -> Unit = {}
 ) {
     val isOn = device.status == DeviceStatus.ON
@@ -37,71 +39,111 @@ fun DeviceCard(
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                Surface(
-                    color = if (isOn) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
-                    shape = MaterialTheme.shapes.medium,
-                    modifier = Modifier.size(48.dp)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = getDeviceIcon(device.type),
-                            contentDescription = null,
-                            tint = if (isOn) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                    Surface(
+                        color = if (isOn) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                        shape = MaterialTheme.shapes.medium,
+                        modifier = Modifier.size(48.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = getDeviceIcon(device.type),
+                                contentDescription = null,
+                                tint = if (isOn) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
-                }
 
-                Spacer(modifier = Modifier.width(16.dp))
+                    Spacer(modifier = Modifier.width(16.dp))
 
-                Column {
-                    // Device Name (Headline)
-                    Text(
-                        text = device.name.ifBlank { "Smart Device" },
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-
-                    // Display Real Room Name (Subtitle)
-                    Text(
-                        text = displayRoomName,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-
-                    Spacer(modifier = Modifier.height(4.dp))
-                    StatusBadge(status = device.status)
-                }
-            }
-
-            when (device.type) {
-                DeviceType.MULTI_SWITCH -> {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        val activeSwitches = device.subSwitches.count { it.status == DeviceStatus.ON }
+                    Column {
+                        // Device Name (Headline)
                         Text(
-                            text = "$activeSwitches/${device.subSwitches.size} ON",
+                            text = device.name.ifBlank { "Smart Device" },
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+
+                        // Display Real Room Name (Subtitle)
+                        Text(
+                            text = displayRoomName,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        Icon(Icons.Default.ChevronRight, contentDescription = "Manage Switches")
+
+                        Spacer(modifier = Modifier.height(4.dp))
+                        StatusBadge(status = device.status)
                     }
                 }
-                DeviceType.CAMERA -> {
-                    Icon(Icons.Default.ChevronRight, contentDescription = "View Live Stream")
+
+                when (device.type) {
+                    DeviceType.MULTI_SWITCH -> {
+                        // For multi-switch, the main card toggle might act as a master switch or we just show a chevron
+                        IconButton(onClick = onClick) {
+                            Icon(Icons.Default.ChevronRight, contentDescription = "Manage Switches")
+                        }
+                    }
+                    DeviceType.CAMERA -> {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Switch(
+                                checked = isOn,
+                                enabled = !isUnavailable,
+                                onCheckedChange = { onToggle() }
+                            )
+                            IconButton(onClick = onClick) {
+                                Icon(Icons.Default.ChevronRight, contentDescription = "View Live Stream")
+                            }
+                        }
+                    }
+                    else -> {
+                        Switch(
+                            checked = isOn,
+                            enabled = !isUnavailable,
+                            onCheckedChange = { onToggle() }
+                        )
+                    }
                 }
-                else -> {
-                    Switch(
-                        checked = isOn,
-                        enabled = !isUnavailable,
-                        onCheckedChange = { onToggle() }
-                    )
+            }
+
+            if (device.type == DeviceType.MULTI_SWITCH && device.subSwitches.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(16.dp))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                device.subSwitches.forEach { sw ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Circle,
+                                contentDescription = null,
+                                modifier = Modifier.size(8.dp),
+                                tint = if (sw.status == DeviceStatus.ON) Color(0xFF4CAF50) else Color.Gray
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text = sw.name,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+                        Switch(
+                            checked = sw.status == DeviceStatus.ON,
+                            enabled = !isUnavailable,
+                            onCheckedChange = { onSubToggle(sw.id) },
+                            modifier = Modifier.scale(0.8f)
+                        )
+                    }
                 }
             }
         }
