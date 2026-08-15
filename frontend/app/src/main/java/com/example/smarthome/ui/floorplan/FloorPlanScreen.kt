@@ -39,8 +39,12 @@ fun FloorPlanScreen(
 
     LaunchedEffect(floorId) {
         deviceViewModel.observeDevicesByFloor(floorId = floorId)
-        floorViewModel.getFloor(floorId) {
-            floor = it
+        floorViewModel.getFloor(floorId) { fetchedFloor ->
+            floor = fetchedFloor
+            // Re-observe with level for better matching if level is available
+            fetchedFloor?.let {
+                deviceViewModel.observeDevicesByFloor(floorId = floorId, level = it.level)
+            }
         }
     }
 
