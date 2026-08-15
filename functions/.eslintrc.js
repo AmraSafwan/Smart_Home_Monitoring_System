@@ -14,6 +14,8 @@ module.exports = {
   ],
 
   rules: {
+    "linebreak-style": "off",
+    "max-len": "off",
     "no-restricted-globals": ["error", "name", "length"],
     "prefer-arrow-callback": "error",
     "quotes": ["error", "double", {"allowTemplateLiterals": true}],
