@@ -280,6 +280,9 @@ fun HomeScreen(
                             onToggle = {
                                 deviceViewModel.toggleDevice(device)
                             },
+                            onSubToggle = { subSwitchId ->
+                                deviceViewModel.toggleSubSwitch(device, subSwitchId)
+                            },
                             onClick = {
                                 // Potentially open dialog
                             }
