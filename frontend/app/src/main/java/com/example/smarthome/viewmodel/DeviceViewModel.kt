@@ -2,17 +2,23 @@ package com.example.smarthome.viewmodel
 import com.google.firebase.Firebase
 import com.google.firebase.firestore.firestore
 
+import android.util.Log
+
 import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.smarthome.data.model.Device
 import com.example.smarthome.data.model.DeviceStatus
 import com.example.smarthome.data.model.UsageLog
+import com.example.smarthome.data.model.getWattage
 import com.example.smarthome.data.repository.DeviceRepository
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
+import java.util.Locale
 
 class DeviceViewModel : ViewModel() {
 
@@ -33,19 +39,34 @@ class DeviceViewModel : ViewModel() {
 
     init {
         observeAllDevices()
+        startPeriodicScheduleCheck()
     }
 
+    private fun startPeriodicScheduleCheck() {
+        viewModelScope.launch {
+            while (true) {
+                checkSchedules(devices.value)
+                delay(60000) // Check every minute
+            }
+        }
+    }
+
+
     fun observeAllDevices() {
+        Log.d("FirebaseDebug", "Started observing devices")
         isLoading.value = true
 
         repository.observeDevices(
             onResult = { deviceList ->
+                Log.d("FirebaseDebug", "Data received. List size: ${deviceList.size}")
                 devices.value = deviceList
                 isLoading.value = false
                 errorMessage.value = null
                 checkSafetyCutoffs(deviceList)
+                checkSchedules(deviceList)
             },
             onError = { exception ->
+                Log.e("FirebaseDebug", "Firebase error: ${exception.message}")
                 isLoading.value = false
                 errorMessage.value = exception.message ?: "Unable to load devices"
             }
@@ -112,12 +133,43 @@ class DeviceViewModel : ViewModel() {
         safetyCutoffJobs.remove(device.id)
     }
 
-    fun observeDevicesByFloor(floorId: String) {
+    private fun checkSchedules(deviceList: List<Device>) {
+        val now = Calendar.getInstance()
+        val currentTimeString = SimpleDateFormat("HH:mm", Locale.getDefault()).format(now.time)
+
+        deviceList.filter { it.autoScheduleEnabled }.forEach { device ->
+            val startTime = device.startTime // e.g., "18:00"
+            val endTime = device.endTime     // e.g., "06:00"
+
+            if (startTime != null && endTime != null) {
+                val shouldBeOn = isTimeInInterval(currentTimeString, startTime, endTime)
+                val isCurrentlyOn = device.status == DeviceStatus.ON
+
+                if (shouldBeOn && !isCurrentlyOn) {
+                    repository.updateDeviceStatus(device.id, DeviceStatus.ON) { }
+                } else if (!shouldBeOn && isCurrentlyOn) {
+                    repository.updateDeviceStatus(device.id, DeviceStatus.OFF) { }
+                }
+            }
+        }
+    }
+
+    private fun isTimeInInterval(current: String, start: String, end: String): Boolean {
+        return if (start <= end) {
+            current >= start && current < end
+        } else {
+            // Overnights, e.g., 22:00 to 06:00
+            current >= start || current < end
+        }
+    }
+
+    fun observeDevicesByFloor(floorId: String, level: Int? = null) {
         isLoading.value = true
         errorMessage.value = null
 
         repository.observeDevicesByFloor(
             floorId = floorId,
+            level = level,
             onResult = { deviceList ->
                 devices.value = deviceList
                 isLoading.value = false
@@ -132,14 +184,24 @@ class DeviceViewModel : ViewModel() {
 
     fun toggleDevice(device: Device) {
         val isTurningOn = device.status != DeviceStatus.ON
-        val updates = mutableMapOf<String, Any?>(
-            "status" to if (isTurningOn) DeviceStatus.ON.name else DeviceStatus.OFF.name,
-            "turnedOnAt" to if (isTurningOn) com.google.firebase.Timestamp.now() else null
-        )
+        val newStatus = if (isTurningOn) DeviceStatus.ON else DeviceStatus.OFF
 
-        Firebase.firestore.collection("devices")
-            .document(device.id)
-            .update(updates)
+        // Optimistic update only for immediate UI feedback.
+        val updatedList = devices.value.map {
+            if (it.id == device.id) it.copy(statusString = newStatus.name) else it
+        }
+        devices.value = updatedList
+
+        repository.updateDeviceStatus(device.id, newStatus) { success ->
+            if (!success) {
+                Log.e("FirebaseUpdate", "Failed to update device status for ${device.id}")
+                repository.observeDevices(
+                    onResult = { devices.value = it },
+                    onError = { }
+                )
+                errorMessage.value = "Failed to update device status"
+            }
+        }
     }
 
     fun toggleSubSwitch(
@@ -154,12 +216,27 @@ class DeviceViewModel : ViewModel() {
             }
         }
 
+        // Optimistic update
+        val updatedDevices = devices.value.map {
+            if (it.id == device.id) {
+                it.copy(subSwitches = updatedSubSwitches)
+            } else {
+                it
+            }
+        }
+        devices.value = updatedDevices
+
         repository.updateSubSwitchStatus(
             deviceId = device.id,
             subSwitches = updatedSubSwitches,
             onComplete = { success ->
                 if (!success) {
                     errorMessage.value = "Failed to update switch"
+                    // Revert on failure
+                    repository.observeDevices(
+                        onResult = { devices.value = it },
+                        onError = { }
+                    )
                 }
             }
         )

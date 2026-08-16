@@ -52,6 +52,25 @@ class DeviceRepository {
                         val device = doc.toObject(Device::class.java)
                         device?.apply {
                             id = doc.id
+                            // Handle floorId vs floorID casing inconsistency in Firestore
+                            if (this.floorId.isBlank()) {
+                                this.floorId = (doc.get("floorId") ?: doc.get("floorID"))?.toString() ?: ""
+                            }
+                            
+                            // Ensure row and column are parsed correctly
+                            val rawRow = doc.get("row")
+                            val rawCol = doc.get("column")
+                            this.row = when(rawRow) {
+                                is Number -> rawRow.toInt()
+                                is String -> rawRow.toIntOrNull() ?: 0
+                                else -> 0
+                            }
+                            this.column = when(rawCol) {
+                                is Number -> rawCol.toInt()
+                                is String -> rawCol.toIntOrNull() ?: 0
+                                else -> 0
+                            }
+
                             roomName = currentRoomMap[roomId] ?: roomId
                         }
                     } catch (e: Exception) {
@@ -72,6 +91,7 @@ class DeviceRepository {
 
     fun observeDevicesByFloor(
         floorId: String,
+        level: Int? = null,
         onResult: (List<Device>) -> Unit,
         onError: (Exception) -> Unit
     ): ListenerRegistration? {
@@ -88,7 +108,6 @@ class DeviceRepository {
         }
 
         devicesListener = devicesCollection
-            .whereEqualTo("floorId", floorId)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
                     Log.e("SmartHome_Repo", "Error fetching devices for floor $floorId: ${error.message}")
@@ -97,12 +116,58 @@ class DeviceRepository {
                 }
 
                 if (snapshot != null) {
+                    val targetDocId = floorId.trim()
+                    
                     val devices = snapshot.documents.mapNotNull { doc ->
                         try {
-                            val device = doc.toObject(Device::class.java)
-                            device?.apply {
-                                id = doc.id
-                                roomName = currentRoomMap[roomId] ?: roomId
+                            // 1. Handle floorId / floorID casing and type mismatch
+                            val rawFloorVal = doc.get("floorId") ?: doc.get("floorID")
+                            val docFloorId = when (rawFloorVal) {
+                                is String -> rawFloorVal
+                                is Number -> rawFloorVal.toInt().toString()
+                                else -> rawFloorVal?.toString() ?: ""
+                            }.trim()
+
+                            // 2. Strict, Precise Filtering
+                            val isMatch = if (level != null) {
+                                // If level is provided, match strictly against known level formats
+                                // e.g. Level 0 -> "floor001" or "1"
+                                // e.g. Level 1 -> "floor002" or "2"
+                                val displayLevel = level + 1
+                                val floorStr = "floor${displayLevel.toString().padStart(3, '0')}"
+                                val shortId = displayLevel.toString()
+                                
+                                docFloorId == targetDocId || docFloorId == floorStr || docFloorId == shortId
+                            } else {
+                                // Fallback to strict Document ID match
+                                docFloorId == targetDocId
+                            }
+
+                            if (isMatch) {
+                                val device = doc.toObject(Device::class.java)
+                                device?.apply {
+                                    id = doc.id
+                                    this.floorId = docFloorId
+                                    roomName = currentRoomMap[roomId] ?: roomId
+                                    
+                                    // 3. Ensure row and column are parsed correctly
+                                    val rawRow = doc.get("row")
+                                    val rawCol = doc.get("column")
+                                    
+                                    this.row = when(rawRow) {
+                                        is Number -> rawRow.toInt()
+                                        is String -> rawRow.toIntOrNull() ?: 0
+                                        else -> 0
+                                    }
+                                    
+                                    this.column = when(rawCol) {
+                                        is Number -> rawCol.toInt()
+                                        is String -> rawCol.toIntOrNull() ?: 0
+                                        else -> 0
+                                    }
+                                }
+                            } else {
+                                null
                             }
                         } catch (e: Exception) {
                             Log.e("SmartHome_Repo", "FAILED TO PARSE DOC '${doc.id}': ${e.localizedMessage}")
@@ -150,7 +215,10 @@ class DeviceRepository {
         devicesCollection.document(deviceId)
             .update(updates)
             .addOnSuccessListener { onComplete(true) }
-            .addOnFailureListener { onComplete(false) }
+            .addOnFailureListener { e ->
+                Log.e("FirebaseUpdate", "Repository: Failed to update status for $deviceId", e)
+                onComplete(false)
+            }
     }
 
     fun updateSubSwitchStatus(
@@ -174,7 +242,10 @@ class DeviceRepository {
         devicesCollection.document(deviceId)
             .update("subSwitches", formattedSwitches)
             .addOnSuccessListener { onComplete(true) }
-            .addOnFailureListener { onComplete(false) }
+            .addOnFailureListener { e ->
+                Log.e("FirebaseUpdate", "Repository: Failed to update subswitches for $deviceId", e)
+                onComplete(false)
+            }
     }
 
     fun updateDeviceSchedule(
@@ -198,7 +269,10 @@ class DeviceRepository {
         devicesCollection.document(deviceId)
             .update("schedule", scheduleObj)
             .addOnSuccessListener { onComplete(true) }
-            .addOnFailureListener { onComplete(false) }
+            .addOnFailureListener { e ->
+                Log.e("FirebaseUpdate", "Repository: Failed to update schedule for $deviceId", e)
+                onComplete(false)
+            }
     }
 
     fun updateSafetyDuration(
@@ -221,7 +295,10 @@ class DeviceRepository {
         devicesCollection.document(deviceId)
             .update(updates)
             .addOnSuccessListener { onComplete(true) }
-            .addOnFailureListener { onComplete(false) }
+            .addOnFailureListener { e ->
+                Log.e("FirebaseUpdate", "Repository: Failed to update status for $deviceId", e)
+                onComplete(false)
+            }
     }
 
     fun fetchAllUsageLogs(
