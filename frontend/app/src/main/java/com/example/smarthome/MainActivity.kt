@@ -9,13 +9,10 @@ import com.example.smarthome.ui.theme.SmartHomeTheme
 class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
-
         super.onCreate(savedInstanceState)
 
         setContent {
-
             SmartHomeTheme {
-
                 AppNavigation()
             }
         }
