@@ -2,6 +2,9 @@ package com.example.smarthome.ui.navigation
 
 object Routes {
 
+    const val LOGIN = "login"
+    const val SIGNUP = "signup"
+
     const val HOME = "home"
     const val FLOORS = "floors"
     const val CAMERA = "camera"
